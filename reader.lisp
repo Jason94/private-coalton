@@ -9,8 +9,9 @@
    #:private-coalton.monad-transformer)
   (:export
    #:ReaderT
-   #:Reader
    #:run-readerT
+   #:Reader
+   #:run-reader
    #:local
    #:ask
    #:asks
@@ -29,6 +30,14 @@
   (define (run-readerT (ReaderT fenv->val) env)
     "Run a ReaderT inside an environment."
     (fenv->val env))
+  
+  ;; TODO: This works, but waiting on a fix to the alias PR
+
+  ; (declare run-reader (Reader :env :value -> :env -> :value))
+  (declare run-reader (ReaderT :env Identity :value -> :env -> :value))
+  (define (run-reader reader env)
+    "Run a Reader inside an environment."
+    (run-identity (run-readerT reader env)))
   
   (declare local ((:env -> :env) -> ReaderT :env :m :value -> ReaderT :env :m :value))
   (define (local fenv (ReaderT fenv->a))
