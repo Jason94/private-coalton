@@ -4,92 +4,75 @@
    #:coalton
    #:coalton-prelude
    #:coalton-library/functions
-   #:coalton-library/classes)
+   #:coalton-library/classes
+   #:private-coalton.identity
+   #:private-coalton.monad-transformer)
   (:export
+   #:ReaderT
    #:Reader
-   #:run-reader
+   #:run-readerT
    #:local
    #:ask
-   #:asks))
+   #:asks
+   #:lift-readerT))
 (in-package :private-coalton.reader)
 
 (coalton-toplevel
   (repr :transparent)
-  (define-type (Reader :env :value)
-    "A computation that runs inside an :env environment."
-    (Reader (:env -> :value)))
+  (define-type (ReaderT :env :m :value)
+    "A monadic computation that runs inside an :env environment."
+    (ReaderT (:env -> :m :value)))
   
-  (declare run-reader (Reader :env :value -> :env -> :value))
-  (define (run-reader (Reader fenv->val) env)
-    "Run a Reader inside an environment."
+  (define-type-alias (Reader :env :value) (ReaderT :env Identity :value))
+  
+  (declare run-readerT (ReaderT :env :m :value -> :env -> :m :value))
+  (define (run-readerT (ReaderT fenv->val) env)
+    "Run a ReaderT inside an environment."
     (fenv->val env))
   
-  (declare local ((:env -> :env) -> Reader :env :value -> Reader :env :value))
-  (define (local fenv (Reader fenv->a))
+  (declare local ((:env -> :env) -> ReaderT :env :m :value -> ReaderT :env :m :value))
+  (define (local fenv (ReaderT fenv->a))
     "Run a computation in a modified environment."
-    (Reader (compose fenv->a fenv)))
+    (ReaderT (compose fenv->a fenv)))
   
-  (declare ask (Reader :env :env))
+  (declare ask (Monad :m => ReaderT :env :m :env))
   (define ask
     "Retrieve the computation environment."
-    (Reader id))
+    (ReaderT (compose pure id)))
   
-  (declare asks ((:env -> :a) -> Reader :env :a))
-  (define asks
+  (declare asks (Applicative :m => (:env -> :a) -> ReaderT :env :m :a))
+  (define (asks fenv->a)
     "Retrieve an aspect of the computation environment."
-    Reader))
+    (ReaderT (compose pure fenv->a))))
 
 (coalton-toplevel
-  (define-instance (Functor (Reader :env))
-    (define (map fa->b (Reader fenv->a))
-      (Reader (compose fa->b fenv->a))))
+  (declare map-readerT ((:m :a -> :n :b) -> ReaderT :env :m :a -> ReaderT :env :n :b))
+  (define (map-readerT fma->nb (ReaderT fenv->ma))
+    (ReaderT (compose fma->nb fenv->ma)))
   
-  (define-instance (Applicative (Reader :env))
-    (define pure (compose Reader const))
-    (define (liftA2 fc->d->e (Reader fenv->c) (Reader fenv->d))
-      (Reader (fn (env)
-                (fc->d->e (fenv->c env) (fenv->d env))))))
-  
-  (define-instance (Monad (Reader :env))
-    (define (>>= (Reader fenv->a) fa->readerb)
-      (Reader (fn (env)
-                (match (fa->readerb (fenv->a env))
-                  ((Reader fenv->b)
-                   (fenv->b env))))))))
+  (declare lift-readerT (:m :a -> ReaderT :env :m :a))
+  (define lift-readerT (compose ReaderT const)))
 
 (coalton-toplevel
-  (repr :enum)
-  (define-type Color Red Blue Yellow)
+  (define-instance (Functor :m => Functor (ReaderT :env :m))
+    (define map (compose map-readerT map)))
+  
+  (define-instance (Applicative :m => Applicative (ReaderT :env :m))
+    (define pure (compose lift-readerT pure))
+    (define (liftA2 fc->d->e (ReaderT fenv->mc) (ReaderT fenv->md))
+      (ReaderT (fn (env)
+                (liftA2 fc->d->e (fenv->mc env) (fenv->md env))))))
+  
+  (define-instance (Monad :m => Monad (ReaderT :env :m))
+    (define (>>= (ReaderT fenv->ma) fa->readermb)
+      (ReaderT
+        (fn (env)
+          (>>= (fenv->ma env)
+               (fn (a)
+                 (match (fa->readermb a)
+                   ((ReaderT fenv->mb)
+                    (fenv->mb env)))))))))
 
-  (declare rotate (Color -> Color))
-  (define (rotate c)
-    (match c
-      ((Red) Blue)
-      ((Blue) Yellow)
-      ((Yellow) Red)))
+  (define-instance (MonadTransformer (ReaderT :env))
+    (define lift lift-readerT)))
 
-  (declare RGB (Reader Color (List Integer)))
-  (define RGB
-    (do
-      (color <- ask)
-      (pure
-        (match color
-          ((Red) (make-list 255 0 0))
-          ((Blue) (make-list 0 255 0))
-          ((Yellow) (make-list 0 0 255)))))))
-
-(coalton
-  (run-reader
-    (do
-      (ints-rep <- RGB)
-      (let _ = (traceobject "Ints rep" ints-rep))
-      (next-color <- (asks rotate))
-      (ints-rep2 <- (local (const next-color) RGB))
-      (let _ = (traceobject "Ints rep 2" ints-rep2))
-      (pure Unit))
-    Red))
-
-(coalton
-  (run-reader
-    (Reader (+ 1))
-    0))
