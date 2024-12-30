@@ -84,7 +84,10 @@
   (define (runT t)
     (match (resume t)
       ((OK a)      a)
-      ((Err f->ta) (runT (f->ta))))))
+      ((Err f->ta) (runT (f->ta)))))
+
+  (define-instance (Functor (Trampoline :a))
+    (define (map ))
 
 (coalton-toplevel
   (declare even (Integer -> Trampoline Boolean Unit))
