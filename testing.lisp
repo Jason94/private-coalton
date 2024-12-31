@@ -6,7 +6,7 @@
    #:coalton-library/monad/state
    #:private-coalton.identity
    #:private-coalton.monad-transformer
-   #:private-coalton.reader))
+   #:private-coalton.environment))
 (in-package :private-coalton.testing)
 
 (coalton-toplevel
@@ -21,7 +21,7 @@
       ((Yellow) Red))))
 
 (coalton-toplevel
-  (declare RGB (ReaderT Color Identity (List Integer)))
+  (declare RGB (Env Color (List Integer)))
   (define RGB
     (do
       (color <- ask)
@@ -32,7 +32,7 @@
           ((Yellow) (make-list 0 0 255)))))))
 
 (coalton
-  (run-reader
+  (run-env
     (do
       (ints-rep <- RGB)
       (let _ = (traceobject "Ints rep" ints-rep))
@@ -46,15 +46,15 @@
   (define-struct Configuration
     (overdraft-protection Boolean))
 
-  (define-type-alias (BankState :val)
-    (ST Integer :val))
+  (define-type-alias BankState
+    (ST Integer))
 
-  (define-type-alias (BankM :val)
-    (ReaderT Configuration (ST Integer) :val))
+  (define-type-alias BankM
+    (EnvT Configuration BankState))
   
   (declare run-bankM (BankM :val -> Configuration -> Integer -> Tuple Integer :val))
   (define (run-bankM bankm conf initial-balance)
-    (run (run-readerT bankm conf) initial-balance)))
+    (run (run-envT bankm conf) initial-balance)))
   
 (coalton-toplevel
   (declare deposit (Integer -> BankM Unit))
@@ -82,6 +82,3 @@
       (withdraw 20))
     (Configuration True)
     0))
-
-  ; (define-type-alias (BankM2 :val)
-  ;   (ReaderT Configuration (ST Integer :val) :val)))

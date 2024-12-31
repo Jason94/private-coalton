@@ -1,5 +1,5 @@
 (in-package :cl-user)
-(defpackage :private-coalton.env
+(defpackage :private-coalton.environment
   (:use
    #:coalton
    #:coalton-prelude
@@ -16,7 +16,7 @@
    #:ask
    #:asks
    #:lift-envT))
-(in-package :private-coalton.env)
+(in-package :private-coalton.environment)
 
 (coalton-toplevel
   (repr :transparent)
@@ -31,10 +31,7 @@
     "Run a EnvT inside an environment."
     (fenv->val env))
   
-  ;; TODO: This works, but waiting on a fix to the alias PR
-
-  ; (declare run-env (Env :env :value -> :env -> :value))
-  (declare run-env (EnvT :env Identity :value -> :env -> :value))
+  (declare run-env (Env :env :value -> :env -> :value))
   (define (run-env env-computation env)
     "Run a Env inside an environment."
     (run-identity (run-envT env-computation env)))
