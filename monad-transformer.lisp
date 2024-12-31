@@ -4,11 +4,12 @@
    #:coalton
    #:coalton-prelude
    #:coalton-library/classes)
-  (:export
-   #:MonadTransformer
-   #:lift))
+  )
+  ;; (:export
+  ;;  #:MonadTransformer
+  ;;  #:lift))
 (in-package :private-coalton.monad-transformer)
 
-(coalton-toplevel
-  (define-class (MonadTransformer :t)
-    (lift (Monad :m => :m :a -> :t :m :a))))
+;; (coalton-toplevel
+;;   (define-class (MonadTransformer :t)
+;;     (lift (Monad :m => :m :a -> :t :m :a))))

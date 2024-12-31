@@ -5,6 +5,7 @@
    #:coalton-prelude
    #:coalton-library/functions
    #:coalton-library/classes
+   #:coalton-library/monad/state
    #:private-coalton.identity
    #:private-coalton.monad-transformer)
   (:export
@@ -81,3 +82,8 @@
 
   (define-instance (MonadTransformer (EnvT :env))
     (define lift lift-envT)))
+
+(coalton-toplevel
+  (define-instance (MonadState :s :m => MonadState :s (EnvT :env :m))
+    (define put (compose lift put))
+    (define get (lift get))))
