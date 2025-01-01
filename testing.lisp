@@ -32,11 +32,24 @@
     (minimum-balance      "Minimum balance that must be floated by an account."                          Balance)
     (overdraft-protection "If True, prevents an account from being withdrawn below the minimum balance." Boolean))
 
+  (declare without-overdraft-protection (Configuration -> Configuration))
+  (define (without-overdraft-protection (Configuration min-balance _))
+    (Configuration min-balance False))
+
   (define-struct Account
     (name    AccountName)
     (balance Balance))
 
   (define-type-alias BankState (m:Map AccountName Account))
+
+  (declare print-report (BankState -> Unit))
+  (define (print-report accounts)
+    (for (Account name balance) in (m:values accounts)
+      (lisp :a (name balance)
+        (cl:format cl:t "Name:~10T~a~%Balance:~10T~a~%~%" name balance)))
+    (lisp :a ()
+      (cl:format cl:t "--------~%"))
+    Unit)
 
   (define-type-alias BankStateM
     (ST BankState))
@@ -73,9 +86,19 @@
     (run (run-envT bankm conf) initial-balance)))
 
 (coalton-toplevel
+  (declare print-reportM (BankM (BankResult Unit)))
+  (define print-reportM
+    (do
+     (accounts <- get)
+     (pure (Ok (print-report accounts)))))
+
   (declare get-account (AccountName -> BankState -> BankResult Account))
   (define (get-account account-name accounts)
     (opt->result (AccountNotFound account-name) (m:lookup accounts account-name)))
+
+  (declare get-accountM (AccountName -> BankM (BankResult Account)))
+  (define (get-accountM account-name)
+    (map (get-account account-name) get))
 
   (declare account-valid? (Account -> BankM (BankResult Account)))
   (define (account-valid? account)
@@ -113,7 +136,7 @@
     (run-resultT
      (do
       (err-ifT (< amount 0) (InvalidDeposit amount))
-      ((Account _ balance) <- (ResultT (map (get-account account-name) get)))
+      ((Account _ balance) <- (ResultT (get-accountM account-name)))
       (let new-account = (Account account-name (+ balance amount)))
       (ResultT (set-account new-account))))))
 
@@ -124,7 +147,7 @@
     (run-resultT
      (do
       (err-ifT (< amount 0) (InvalidWithdrawal amount))
-      (acc <- (ResultT (map (get-account account-name) get)))
+      (acc <- (ResultT (get-accountM account-name)))
       (map-errT (fn (er)
                   (Unknown
                    (s:concat "Cannot withdraw from an invalid account ["
@@ -156,7 +179,21 @@
             (do
              (deposit from-acc-name amount)
              (pure (Err er))))
-           ((Ok _) (pure (Ok Unit))))))))))
+           ((Ok _) (pure (Ok Unit)))))))))
+
+  (declare close-account (AccountName -> AccountName -> BankM (BankResult Unit)))
+  (define (close-account acc-to-close-name deposit-acc-name)
+    (run-resultT
+     (do
+      (acc-to-close <- (ResultT (get-accountM acc-to-close-name)))
+      (ResultT (local
+                without-overdraft-protection
+                (transfer acc-to-close-name deposit-acc-name (.balance acc-to-close))))
+      (modify (fn (mp)
+                (with-default
+                  mp
+                  (m:remove mp acc-to-close-name))))
+      (pure Unit)))))
 
 (cl:defmacro do-resultT (cl:&body body)
   `(run-resultT
@@ -167,14 +204,19 @@
         body))))
 
 (coalton
- (trace-tuple
-  "Accounts" "Result"
-  (run-bankM
-   (do-resultT
-     (create-account "Checking" 100)
-     (deposit "Checking" 10)
-     (create-account "Savings" 50)
-     (transfer "Savings" "Checking" 200)
-     (withdraw "Savings" 15))
-   (Configuration 10 True)
-   m:empty)))
+  (progn
+    (let (Tuple accounts res) =
+      (run-bankM
+       (do-resultT
+         (create-account "Checking" 100)
+         print-reportM
+         (create-account "Savings" 50)
+         (transfer "Savings" "Checking" 30)
+         (create-account "Retirement" 10)
+         print-reportM
+         (close-account "Savings" "Retirement")
+         )
+       (Configuration 10 True)
+       m:empty))
+    (print-report accounts)
+    (traceobject "Result" res)))
