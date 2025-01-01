@@ -24,7 +24,8 @@
 ;;; Bank Example
 ;;;
 
-(coalton-toplevel (define-type-alias AccountName String)
+(coalton-toplevel
+  (define-type-alias AccountName String)
   (define-type-alias Balance Integer)
 
   (define-struct Configuration
@@ -43,24 +44,48 @@
   (define-type-alias BankM
     (EnvT Configuration BankStateM))
 
+  (define-type BankError
+    (AccountAlreadyExists  AccountName)
+    (InvalidDeposit        Integer)
+    (InvalidWithdrawal     Integer)
+    (InvalidAccountBalance AccountName Balance)
+    (AccountNotFound       AccountName)
+    (Unknown               String))
+
+  (define-instance (Into BankError String)
+    (define (into err)
+      (match err
+        ((AccountAlreadyExists name)
+         (s:concat "An account already exists with name: " name))
+        ((InvalidDeposit _) "Cannot deposit a negative amount")
+        ((InvalidWithdrawal _) "Cannot withdraw a negative amount")
+        ((InvalidAccountBalance name _)
+         (s:concat "Account balance below the minimum balance: "
+                   name))
+        ((AccountNotFound name) (s:concat "Account not found: " name))
+        ((Unknown s) (s:concat "Unknown Error: " s)))))
+
+  (define-type-alias BankResult
+    (Result BankError))
+
   (declare run-bankM (BankM :val -> Configuration -> BankState -> Tuple BankState :val))
   (define (run-bankM bankm conf initial-balance)
     (run (run-envT bankm conf) initial-balance)))
 
 (coalton-toplevel
-  (declare get-account (AccountName -> BankState -> Result String Account))
+  (declare get-account (AccountName -> BankState -> BankResult Account))
   (define (get-account account-name accounts)
-    (opt->result "Could not find account" (m:lookup accounts account-name)))
+    (opt->result (AccountNotFound account-name) (m:lookup accounts account-name)))
 
-  (declare account-valid? (Account -> BankM (Result String Account)))
+  (declare account-valid? (Account -> BankM (BankResult Account)))
   (define (account-valid? account)
     (do
      (minimum-balance <- (asks .minimum-balance))
      (if (>= (.balance account) minimum-balance)
          (pure (Ok account))
-         (pure (Err "Account balance is too low!")))))
+         (pure (Err (InvalidAccountBalance (.name account) (.balance account)))))))
 
-  (declare set-account (Account -> BankM (Result String Account)))
+  (declare set-account (Account -> BankM (BankResult Account)))
   (define (set-account acc)
     "Update/insert an account and return it for convenience."
     (do
@@ -69,7 +94,7 @@
      (pure (Ok acc)))))
 
 (coalton-toplevel
-  (declare create-account (AccountName -> Balance -> BankM (Result String Account)))
+  (declare create-account (AccountName -> Balance -> BankM (BankResult Account)))
   (define (create-account name initial-balance)
     (run-resultT
      (do
@@ -77,54 +102,79 @@
       (ResultT
        (match (get-account name accounts)
          ((Err _) (pure (Ok Unit)))
-         ((Ok _) (pure (Err "Account already exists")))))
+         ((Ok _) (pure (Err (AccountAlreadyExists name))))))
       (let unvalidated-account = (Account name initial-balance))
       (account <- (ResultT (account-valid? unvalidated-account)))
       (ResultT (set-account account)))))
 
-  (declare deposit (AccountName -> Integer -> BankM (Result String Account)))
+  (declare deposit (AccountName -> Integer -> BankM (BankResult Account)))
   (define (deposit account-name amount)
     "Deposit AMOUNT into account with ACCOUNT-NAME and return the Account for convenience."
     (run-resultT
      (do
-      (err-ifT (< amount 0) "Cannot deposit negative amount")
+      (err-ifT (< amount 0) (InvalidDeposit amount))
       ((Account _ balance) <- (ResultT (map (get-account account-name) get)))
       (let new-account = (Account account-name (+ balance amount)))
       (ResultT (set-account new-account))))))
 
 (coalton-toplevel
-  (declare withdraw (AccountName -> Integer -> BankM (Result String Account)))
+  (declare withdraw (AccountName -> Integer -> BankM (BankResult Account)))
   (define (withdraw account-name amount)
     "Withdraw AMOUNT from account with ACCOUNT-NAME, returning the Account for convenience."
     (run-resultT
      (do
-      (err-ifT (< amount 0) "Cannot withdraw negative amount")
+      (err-ifT (< amount 0) (InvalidWithdrawal amount))
       (acc <- (ResultT (map (get-account account-name) get)))
-      (map-errT (fn (msg)
-                  (s:concat "Cannot withdraw from an invalid account ["
-                            (s:concat msg "]")))
+      (map-errT (fn (er)
+                  (Unknown
+                   (s:concat "Cannot withdraw from an invalid account ["
+                             (s:concat (into er) "]"))))
                 (ResultT (account-valid? acc)))
       (let new-account = (Account account-name (- (.balance acc) amount)))
       (protection? <- (lift (asks .overdraft-protection)))
       (minimum <- (lift (asks .minimum-balance)))
       (if (and protection?
                (< (.balance new-account) minimum))
-          (ResultT (pure (Err "Cannot withdraw below minimum balance with overdraft protection.")))
+          (ResultT
+           (pure (Err (InvalidWithdrawal amount))))
           (pure Unit))
       (ResultT (set-account new-account))))))
+
+(coalton-toplevel
+  (declare transfer (AccountName -> AccountName -> Balance -> BankM (BankResult Unit)))
+  (define (transfer from-acc-name to-acc-name amount)
+    (do
+     (withdrawal? <- (withdraw from-acc-name amount))
+     (match withdrawal?
+       ((Err er) (pure (Err er)))
+       ((Ok _)
+        (do
+         (deposit? <- (deposit to-acc-name amount))
+         (match deposit?
+           ;; If the deposit failed, put the money back into the from account!
+           ((Err er)
+            (do
+             (deposit from-acc-name amount)
+             (pure (Err er))))
+           ((Ok _) (pure (Ok Unit))))))))))
+
+(cl:defmacro do-resultT (cl:&body body)
+  `(run-resultT
+    (do
+     ,@(cl:mapcar
+        (cl:lambda (form)
+          `(ResultT ,form))
+        body))))
 
 (coalton
  (trace-tuple
   "Accounts" "Result"
   (run-bankM
-   (run-resultT
-   (do
-    (ResultT (create-account "Checking" 100))
-    (ResultT (deposit "Checking" 10))
-    (ResultT (withdraw "Checking" 20))
-    (ResultT (withdraw "Checking" 85))
-    (ResultT (deposit "Checking" 2))
-    (ResultT (withdraw "Checking" 5))
-     ))
-   (Configuration 10 False)
+   (do-resultT
+     (create-account "Checking" 100)
+     (deposit "Checking" 10)
+     (create-account "Savings" 50)
+     (transfer "Savings" "Checking" 200)
+     (withdraw "Savings" 15))
+   (Configuration 10 True)
    m:empty)))
