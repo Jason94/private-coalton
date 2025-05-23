@@ -67,6 +67,6 @@
  (run-env
   (do
    (_ <- print-plus10)
-   (_ <- (local (+ 5) print-plus10))
-   (pure Unit))
+   (_ <- (local-envT (+ 5) print-plus10))
+   (pure 1))
   0))

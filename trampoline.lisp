@@ -86,8 +86,9 @@
       ((OK a)      a)
       ((Err f->ta) (runT (f->ta)))))
 
-  (define-instance (Functor (Trampoline :a))
-    (define (map ))
+  ;; (define-instance (Functor (Trampoline :a))
+  ;;   (define (map ))
+  )
 
 (coalton-toplevel
   (declare even (Integer -> Trampoline Boolean Unit))
@@ -103,10 +104,11 @@
         (More (fn () (even (1- n)))))))
 
 (coalton-toplevel
- (define test-n 10000000))
+ (define test-n 500000000))
 
-(cl:time
- (coalton (runT (even test-n))))
+(cl:defun test-trampoline ()
+  (cl:time
+   (coalton (runT (even test-n)))))
 
 ;;;
 ;;; Supp - Iterative
@@ -122,15 +124,17 @@
       (c:write! ret (not (c:read ret))))
     (error "Unreachable")))
 
-(cl:time
- (coalton (even-iter test-n)))
+(cl:defun test-iter ()
+  (cl:time
+   (coalton (even-iter test-n))))
 
 (cl:defun cl-even-iter (n)
   (cl:declare (cl:fixnum n))
   (cl:let ((ret cl:t))
     (cl:dotimes (i n)
-      (cl:when (cl:zerop n)
+      (cl:when (cl:eql i n)
         (cl:return ret))
       (cl:setf ret (cl:not ret)))))
 
-(cl:time (cl-even-iter (coalton test-n)))
+(cl:defun test-cl-iter ()
+  (cl:time (cl-even-iter (coalton test-n))))
